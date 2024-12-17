@@ -54,6 +54,8 @@
             var source;
             var processor;
             var socket;
+            let audioQueue = [];
+            let isPlaying = false;
 
             $('#sendPrompt2').click(function () {
                 var prompt = $('#chatPrompt2').val();
@@ -175,6 +177,24 @@
         return output;
     }
 
+    function playAudioQueue() {
+        if (audioQueue.length === 0) {
+            isPlaying = false;
+            return;
+        }
+
+        isPlaying = true;
+        const audioBuffer = audioQueue.shift();
+        const audioSource = audioContext.createBufferSource();
+        audioSource.buffer = audioBuffer;
+        audioSource.connect(audioContext.destination);
+        audioSource.start();
+
+        audioSource.onended = () => {
+            playAudioQueue();
+        };
+    }
+
     // Audio streaming
     $('#startAudioStream').click(async function () {
         const desiredSampleRate = 16000; // Set your desired sample rate here (e.g., 16000 Hz)
@@ -220,11 +240,16 @@
     
             const audioBuffer = audioContext.createBuffer(1, float32Data.length, desiredSampleRate);
             audioBuffer.copyToChannel(float32Data, 0);
+
+            audioQueue.push(audioBuffer);
+            if (!isPlaying) {
+                playAudioQueue();
+            }
     
-            const audioSource = audioContext.createBufferSource();
-            audioSource.buffer = audioBuffer;
-            audioSource.connect(audioContext.destination);
-            audioSource.start();
+            // const audioSource = audioContext.createBufferSource();
+            // audioSource.buffer = audioBuffer;
+            // audioSource.connect(audioContext.destination);
+            // audioSource.start();
         };
 
 
