@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Net.WebSockets;
+using System.Text;
 
 namespace AzureSimpleRAG
 {
     public class WebSocketAudioStream : Stream
     {
-        private const int SAMPLES_PER_SECOND = 8000;
+        private const int SAMPLES_PER_SECOND = 16000;
         private const int BYTES_PER_SAMPLE = 2;
         private const int CHANNELS = 1;
 
@@ -16,11 +17,15 @@ namespace AzureSimpleRAG
         private int _bufferWritePos = 0;
         WebSocket _webSocket;
         private bool _isRecording = false;
+        //private static string filePath = @"c:\users\chriss\desktop\audio.wav";
+        //private FileStream _fileStream;
 
 
         private WebSocketAudioStream(WebSocket webSocket)
         {
             _webSocket = webSocket;
+            //_fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+            //WriteWavHeader();
         }
 
         private async Task StartRecordingAsync()
@@ -84,11 +89,48 @@ namespace AzureSimpleRAG
             throw new NotImplementedException();
         }
 
+        //private void WriteWavHeader()
+        //{
+        //    // WAV file header format
+        //    int sampleRate = SAMPLES_PER_SECOND;
+        //    short bitsPerSample = 16;
+        //    short channels = CHANNELS;
+        //    int byteRate = sampleRate * channels * bitsPerSample / 8;
+        //    short blockAlign = (short)(channels * bitsPerSample / 8);
+
+        //    // RIFF header
+        //    _fileStream.Write(Encoding.ASCII.GetBytes("RIFF"), 0, 4);
+        //    _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for file size
+        //    _fileStream.Write(Encoding.ASCII.GetBytes("WAVE"), 0, 4);
+
+        //    // fmt subchunk
+        //    _fileStream.Write(Encoding.ASCII.GetBytes("fmt "), 0, 4);
+        //    _fileStream.Write(BitConverter.GetBytes(16), 0, 4); // Subchunk1Size (16 for PCM)
+        //    _fileStream.Write(BitConverter.GetBytes((short)1), 0, 2); // AudioFormat (1 for PCM)
+        //    _fileStream.Write(BitConverter.GetBytes(channels), 0, 2);
+        //    _fileStream.Write(BitConverter.GetBytes(sampleRate), 0, 4);
+        //    _fileStream.Write(BitConverter.GetBytes(byteRate), 0, 4);
+        //    _fileStream.Write(BitConverter.GetBytes(blockAlign), 0, 2);
+        //    _fileStream.Write(BitConverter.GetBytes(bitsPerSample), 0, 2);
+
+        //    // data subchunk
+        //    _fileStream.Write(Encoding.ASCII.GetBytes("data"), 0, 4);
+        //    _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for data chunk size
+        //}
+
+        //private void UpdateWavHeader()
+        //{
+        //    _fileStream.Seek(4, SeekOrigin.Begin);
+        //    _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 8)), 0, 4); // File size - 8 bytes
+
+        //    _fileStream.Seek(40, SeekOrigin.Begin);
+        //    _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 44)), 0, 4); // Data chunk size
+        //}
+
         public override int Read(byte[] buffer, int offset, int count)
         {
             if (_webSocket.State == WebSocketState.Closed)
             {
-
                 return 0;
             }
             int totalCount = count;
@@ -98,7 +140,7 @@ namespace AzureSimpleRAG
                 : _bufferWritePos - _bufferReadPos;
 
             // For simplicity, we'll block until all requested data is available and not perform partial reads.
-            while (GetBytesAvailable() < count  )
+            while (GetBytesAvailable() < count)
             {
                 Thread.Sleep(100);
                 if (_webSocket.State == WebSocketState.Closed)
@@ -126,6 +168,13 @@ namespace AzureSimpleRAG
                 Array.Copy(_buffer, _bufferReadPos, buffer, offset, count);
                 _bufferReadPos += count;
             }
+
+            // Write the read bytes to the file
+            //_fileStream.Write(buffer, 0, totalCount);
+            //_fileStream.Flush();
+
+
+
             Console.Write($".");
             return totalCount;
         }
@@ -148,6 +197,12 @@ namespace AzureSimpleRAG
         protected override void Dispose(bool disposing)
         {
             Console.WriteLine("Disposing WebSocketAudioStream");
+            //if (disposing)
+            //{
+            //    Console.WriteLine("DIsposing Filestream");
+            //    UpdateWavHeader();
+            //    _fileStream?.Dispose();
+            //}
             base.Dispose(disposing);
         }
     }

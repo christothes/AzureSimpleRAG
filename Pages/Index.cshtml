@@ -231,7 +231,22 @@
 
         socket.onmessage = async (event) => {
            const arrayBuffer = await event.data.arrayBuffer();
+
+           if (arrayBuffer.byteLength === 4) {
+               // check if the 4 bytes in the arrayBuffer are all zero
+                const view = new DataView(arrayBuffer);
+                if (view.getInt32() === 0) {
+                     console.log('Received empty audio buffer');
+                     console.log(arrayBuffer);
+                     audioQueue = [];
+                     return;
+                }
+           }
            const pcmData = new Int16Array(arrayBuffer);
+           if (pcmData.length === 0) {
+               console.log('Received empty audio buffer');
+               return;
+           }
            const float32Data = new Float32Array(pcmData.length);
 
             for (let i = 0; i < pcmData.length; i++) {
@@ -246,18 +261,7 @@
             if (!isPlaying) {
                 playAudioQueue();
             }
-    
-            // const audioSource = audioContext.createBufferSource();
-            // audioSource.buffer = audioBuffer;
-            // audioSource.connect(audioContext.destination);
-            // audioSource.start();
         };
-
-
-
-
-
-
 
         source.connect(processor);
         processor.connect(audioContext.destination);

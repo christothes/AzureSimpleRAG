@@ -140,6 +140,7 @@ async Task Echo(WebSocket webSocket)
         // session.created is the very first command on a session and lets us know that connection was successful.
         if (update is ConversationSessionStartedUpdate)
         {
+            Console.WriteLine();
             Console.WriteLine($" <<< Connected: session started");
             // This is a good time to start capturing microphone input and sending audio to the service. The
             // input stream will be chunked and sent asynchronously, so we don't need to await anything in the
@@ -159,17 +160,20 @@ async Task Echo(WebSocket webSocket)
         // we're sending from the microphone.
         if (update is ConversationInputSpeechStartedUpdate speechStartedUpdate)
         {
+            Console.WriteLine();
             Console.WriteLine($" <<< Start of speech detected @ {speechStartedUpdate.AudioStartTime}");
             // Like any good listener, we can use the cue that the user started speaking as a hint that the app
             // should stop talking. Note that we could also track the playback position and truncate the response
             // item so that the model doesn't "remember things it didn't say" -- that's not demonstrated here.
             //speakerOutput.ClearPlayback();
+            await webSocket.SendAsync(new byte[] { 0x00, 0x00, 0x00, 0x00 }, WebSocketMessageType.Binary, true, CancellationToken.None);
         }
 
         // input_audio_buffer.speech_stopped tells us that the end of speech was detected in the input audio sent
         // from the microphone. It'll automatically tell the model to start generating a response to reply back.
         if (update is ConversationInputSpeechFinishedUpdate speechFinishedUpdate)
         {
+            Console.WriteLine();
             Console.WriteLine($" <<< End of speech detected @ {speechFinishedUpdate.AudioEndTime}");
         }
 
@@ -178,6 +182,7 @@ async Task Echo(WebSocket webSocket)
         // provide good feedback about what the model will use to respond.
         if (update is ConversationInputTranscriptionFinishedUpdate transcriptionFinishedUpdate)
         {
+            Console.WriteLine();
             Console.WriteLine($" >>> USER: {transcriptionFinishedUpdate.Transcript}");
         }
 
@@ -195,6 +200,7 @@ async Task Echo(WebSocket webSocket)
         // That's a good signal to provide a visual break and perform final evaluation of tool calls.
         if (update is ConversationItemStreamingFinishedUpdate itemFinishedUpdate)
         {
+            Console.WriteLine();
             Console.WriteLine("=====================");
             if (itemFinishedUpdate.FunctionName == finishConversationTool.Name)
             {
