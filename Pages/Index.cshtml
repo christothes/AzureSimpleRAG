@@ -237,8 +237,9 @@
             for (let i = 0; i < pcmData.length; i++) {
                 float32Data[i] = pcmData[i] / 0x8000; // Convert PCM16 to Float32
             }
-    
-            const audioBuffer = audioContext.createBuffer(1, float32Data.length, desiredSampleRate);
+            
+            const receivedSampleRate = 24000;
+            const audioBuffer = audioContext.createBuffer(1, float32Data.length, receivedSampleRate);
             audioBuffer.copyToChannel(float32Data, 0);
 
             audioQueue.push(audioBuffer);
