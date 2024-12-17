@@ -209,6 +209,30 @@
             }
         };
 
+        socket.onmessage = async (event) => {
+           const arrayBuffer = await event.data.arrayBuffer();
+           const pcmData = new Int16Array(arrayBuffer);
+           const float32Data = new Float32Array(pcmData.length);
+
+            for (let i = 0; i < pcmData.length; i++) {
+                float32Data[i] = pcmData[i] / 0x8000; // Convert PCM16 to Float32
+            }
+    
+            const audioBuffer = audioContext.createBuffer(1, float32Data.length, desiredSampleRate);
+            audioBuffer.copyToChannel(float32Data, 0);
+    
+            const audioSource = audioContext.createBufferSource();
+            audioSource.buffer = audioBuffer;
+            audioSource.connect(audioContext.destination);
+            audioSource.start();
+        };
+
+
+
+
+
+
+
         source.connect(processor);
         processor.connect(audioContext.destination);
     });

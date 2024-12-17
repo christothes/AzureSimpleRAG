@@ -188,6 +188,7 @@ async Task Echo(WebSocket webSocket)
             Console.Write(deltaUpdate.AudioTranscript);
             Console.Write(deltaUpdate.Text);
             //speakerOutput.EnqueueForPlayback(deltaUpdate.AudioBytes);
+            await webSocket.SendAsync(deltaUpdate.AudioBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
         }
 
         // response.output_item.done tells us that a model-generated item with streaming content is completed.
