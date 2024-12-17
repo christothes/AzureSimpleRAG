@@ -4,6 +4,8 @@
     ViewData["Title"] = "Home page";
 }
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://www.WebRTC-Experiment.com/RecordRTC.js"></script>
+
 <div class="row justify-content-end">
     <p>
         <div class="collapse col-5 me-3" id="collapseExample">
@@ -37,6 +39,8 @@
                 <button class="btn btn-outline-secondary" type="button" id="sendPrompt2">
                     <svg width="32" height="32" viewBox="0 0 32 32" fill="white" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M15.1918 8.90615C15.6381 8.45983 16.3618 8.45983 16.8081 8.90615L21.9509 14.049C22.3972 14.4953 22.3972 15.2189 21.9509 15.6652C21.5046 16.1116 20.781 16.1116 20.3347 15.6652L17.1428 12.4734V22.2857C17.1428 22.9169 16.6311 23.4286 15.9999 23.4286C15.3688 23.4286 14.8571 22.9169 14.8571 22.2857V12.4734L11.6652 15.6652C11.2189 16.1116 10.4953 16.1116 10.049 15.6652C9.60265 15.2189 9.60265 14.4953 10.049 14.049L15.1918 8.90615Z" fill="white"></path></svg>
                 </button>
+                <button class="btn btn-primary" id="startAudioStream">Start Audio Stream</button>
+                <button class="btn btn-danger" id="stopAudioStream">Stop Audio Stream</button>
             </div>
         </div>
     </div>
@@ -45,6 +49,11 @@
 <script>
         $(document).ready(function () {
             var allowedExtensions = ['.txt', '.md', '.json'];
+            var audioStream;
+            var audioContext;
+            var source;
+            var processor;
+            var socket;
 
             $('#sendPrompt2').click(function () {
                 var prompt = $('#chatPrompt2').val();
@@ -155,5 +164,60 @@
                 var fileExtension = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
                 return allowedExtensions.includes(fileExtension);
             }
+
+            // Function to convert Float32Array to PCM16
+    function convertFloat32ToPCM(input) {
+        const output = new DataView(new ArrayBuffer(input.length * 2));
+        for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            output.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+        return output;
+    }
+
+    // Audio streaming
+    $('#startAudioStream').click(async function () {
+        const desiredSampleRate = 16000; // Set your desired sample rate here (e.g., 16000 Hz)
+
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: desiredSampleRate });
+
+        source = audioContext.createMediaStreamSource(audioStream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        var scheme = document.location.protocol === "https:" ? "wss" : "ws";
+        var port = document.location.port ? (":" + document.location.port) : "";
+        const connectionUrl = scheme + "://" + document.location.hostname + port + "/audio";
+        socket = new WebSocket(connectionUrl);
+
+        socket.onopen = () => {
+            console.log('WebSocket connection opened');
+        };
+
+        socket.onclose = () => {
+            console.log('WebSocket connection closed');
+            audioStream.getTracks().forEach(track => track.stop());
+            processor.disconnect();
+            source.disconnect();
+        };
+
+        processor.onaudioprocess = (event) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                const inputData = event.inputBuffer.getChannelData(0);
+                const pcmData = convertFloat32ToPCM(inputData);
+                socket.send(pcmData.buffer);
+            }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+    });
+
+        // Stop audio streaming
+        $('#stopAudioStream').click(function () {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+        });
     });
 </script>
