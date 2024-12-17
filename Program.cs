@@ -34,8 +34,7 @@ EmbeddingsVectorbase _vectorDb = new(client.GetOpenAIEmbeddingsClient());
 List<ChatMessage> _prompt = [];
 
 AzureOpenAIClient aoaiClient = new(new Uri("https://cm0ddf918b146443b.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=cm0ddf918b146443b_chat"), new AzureCliCredential());
-var realtime = aoaiClient.GetRealtimeConversationClient("cm0ddf918b146443b_chat");
-using RealtimeConversationSession session = await realtime.StartConversationSessionAsync();
+RealtimeConversationClient? realtime = aoaiClient.GetRealtimeConversationClient("cm0ddf918b146443b_chat");
 
 // We'll add a simple function tool that enables the model to interpret user input to figure out when it
 // might be a good time to stop the interaction.
@@ -45,21 +44,6 @@ ConversationFunctionTool finishConversationTool = new()
     Description = "Invoked when the user says goodbye, expresses being finished, or otherwise seems to want to stop the interaction.",
     Parameters = BinaryData.FromString("{}")
 };
-
-// Now we configure the session using the tool we created along with transcription options that enable input
-// audio transcription with whisper.
-await session.ConfigureSessionAsync(new ConversationSessionOptions()
-{
-    Tools = { finishConversationTool },
-    InputTranscriptionOptions = new()
-    {
-        Model = "whisper-1",
-    },
-    TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(
-                           detectionThreshold: 0.42f,
-                           //prefixPaddingDuration: TimeSpan.FromMilliseconds(234),
-                           silenceDuration: TimeSpan.FromMilliseconds(1000))
-});
 
 // Register the vector db to be updated when a new file is uploaded
 client.Storage.WhenUploaded(_vectorDb.Add);
@@ -107,7 +91,9 @@ app.Use(async (context, next) =>
         if (context.WebSockets.IsWebSocketRequest)
         {
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            Console.WriteLine("Echo called");
             await Echo(webSocket);
+            Console.WriteLine("Echo exited");
         }
         else
         {
@@ -123,8 +109,31 @@ app.Use(async (context, next) =>
 
 app.Run();
 
+
+async Task<RealtimeConversationSession> InitSession(RealtimeConversationClient rtClient)
+{
+    RealtimeConversationSession session = await rtClient.StartConversationSessionAsync();
+
+    // Now we configure the session using the tool we created along with transcription options that enable input
+    // audio transcription with whisper.
+    await session.ConfigureSessionAsync(new ConversationSessionOptions()
+    {
+        Tools = { finishConversationTool },
+        InputTranscriptionOptions = new()
+        {
+            Model = "whisper-1",
+        },
+        TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(
+                               detectionThreshold: 0.42f,
+                               //prefixPaddingDuration: TimeSpan.FromMilliseconds(234),
+                               silenceDuration: TimeSpan.FromMilliseconds(1000))
+    });
+    return session;
+}
+
 async Task Echo(WebSocket webSocket)
 {
+    using RealtimeConversationSession session = await InitSession(realtime);
     // With the session configured, we start processing commands received from the service.
     await foreach (ConversationUpdate update in session.ReceiveUpdatesAsync())
     {
@@ -137,11 +146,12 @@ async Task Echo(WebSocket webSocket)
             // processing loop.
             _ = Task.Run(async () =>
             {
-                var strem = await WebSocketAudioStream.StartAsync(webSocket);
+                using var stream = await WebSocketAudioStream.StartAsync(webSocket);
                 Console.WriteLine($" >>> Listening to microphone input");
                 Console.WriteLine($" >>> (Just tell the app you're done to finish)");
                 Console.WriteLine();
-                await session.SendInputAudioAsync(strem);
+                await session.SendInputAudioAsync(stream);
+                Console.WriteLine("SendInputAudioAsync exited");
             });
         }
 
@@ -185,11 +195,11 @@ async Task Echo(WebSocket webSocket)
         if (update is ConversationItemStreamingFinishedUpdate itemFinishedUpdate)
         {
             Console.WriteLine("=====================");
-            //if (itemFinishedUpdate.FunctionName == finishConversationTool.Name)
-            //{
-            //    Console.WriteLine($" <<< Finish tool invoked -- ending conversation!");
-            //    break;
-            //}
+            if (itemFinishedUpdate.FunctionName == finishConversationTool.Name)
+            {
+                Console.WriteLine($" <<< Finish tool invoked -- ending conversation!");
+                break;
+            }
         }
 
         // error commands, as the name implies, are raised when something goes wrong.
@@ -202,6 +212,10 @@ async Task Echo(WebSocket webSocket)
             break;
         }
     }
-
+    if (webSocket.State == WebSocketState.Open)
+    {
+        Console.WriteLine("Closing WebSocket");
+        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None);
+    }
 
 }

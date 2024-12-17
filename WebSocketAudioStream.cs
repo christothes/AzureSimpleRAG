@@ -30,11 +30,11 @@ namespace AzureSimpleRAG
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
             Task.Run(async () =>
             {
-                bool _isCocketClosed = false;
-                WebSocketReceiveResult receiveResult = null;
-                while (_isRecording && !_isCocketClosed)
+                bool _isSocketClosed = false;
+                WebSocketReceiveResult? receiveResult = null;
+                while (_isRecording && !_isSocketClosed)
                 {
-                    byte[] _tmpbuffer = new byte[BYTES_PER_SAMPLE * SAMPLES_PER_SECOND * CHANNELS * 1];
+                    byte[] _tmpbuffer = new byte[1024 * 16];
                     receiveResult = await _webSocket.ReceiveAsync(new ArraySegment<byte>(_tmpbuffer), CancellationToken.None);
                     lock (_bufferLock)
                     {
@@ -46,13 +46,14 @@ namespace AzureSimpleRAG
                             bytesToCopy -= bytesToCopyBeforeWrap;
                             _bufferWritePos = 0;
                         }
-                        Array.Copy(_tmpbuffer, 0, _buffer, _bufferWritePos, bytesToCopy);
+                        Array.Copy(_tmpbuffer, receiveResult.Count - bytesToCopy, _buffer, _bufferWritePos, bytesToCopy);
                         _bufferWritePos += bytesToCopy;
                     }
-                    _isCocketClosed = receiveResult.CloseStatus.HasValue;
+                    _isSocketClosed = receiveResult.CloseStatus.HasValue;
                 }
-                Console.WriteLine("Closed socket");
-                if (receiveResult is not null && receiveResult.CloseStatus.HasValue)
+                Console.WriteLine("WebSocketAudioStream detected Closed socket");
+                _isRecording = false;
+                if (receiveResult is not null && receiveResult.CloseStatus.HasValue && _webSocket.State == WebSocketState.Open)
                     await _webSocket.CloseAsync(
             receiveResult.CloseStatus.Value,
         receiveResult.CloseStatusDescription,
@@ -85,6 +86,11 @@ namespace AzureSimpleRAG
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            if (_webSocket.State == WebSocketState.Closed)
+            {
+
+                return 0;
+            }
             int totalCount = count;
 
             int GetBytesAvailable() => _bufferWritePos < _bufferReadPos
@@ -92,9 +98,13 @@ namespace AzureSimpleRAG
                 : _bufferWritePos - _bufferReadPos;
 
             // For simplicity, we'll block until all requested data is available and not perform partial reads.
-            while (GetBytesAvailable() < count)
+            while (GetBytesAvailable() < count  )
             {
                 Thread.Sleep(100);
+                if (_webSocket.State == WebSocketState.Closed)
+                {
+                    return 0;
+                }
             }
 
             lock (_bufferLock)
@@ -116,7 +126,7 @@ namespace AzureSimpleRAG
                 Array.Copy(_buffer, _bufferReadPos, buffer, offset, count);
                 _bufferReadPos += count;
             }
-            Console.Write('.');
+            Console.Write($".");
             return totalCount;
         }
 
@@ -137,6 +147,7 @@ namespace AzureSimpleRAG
 
         protected override void Dispose(bool disposing)
         {
+            Console.WriteLine("Disposing WebSocketAudioStream");
             base.Dispose(disposing);
         }
     }
