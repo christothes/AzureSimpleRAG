@@ -47,231 +47,234 @@
 </div>
 
 <script>
-        $(document).ready(function () {
-            var allowedExtensions = ['.txt', '.md', '.json'];
-            var audioStream;
-            var audioContext;
-            var source;
-            var processor;
-            var socket;
-            let audioQueue = [];
-            let isPlaying = false;
+    $(document).ready(function () {
+        var allowedExtensions = ['.txt', '.md', '.json'];
+        var audioStream;
+        var audioContext;
+        var source;
+        var processor;
+        var socket;
+        let audioQueue = [];
+        let isPlaying = false;
 
-            $('#sendPrompt2').click(function () {
-                var prompt = $('#chatPrompt2').val();
-                if (prompt.trim() === '') {
-                    return;
-                }
-
-                // Clear the chat prompt textbox
-                $('#chatPrompt2').val('');
-
-                // Add the prompt to the chat history
-                $('#chatHistory').append('<p><strong>You:</strong> ' + prompt + '</p>');
-
-                // Send the prompt to the backend via AJAX
-                $.ajax({
-                    url: '/chat',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: prompt,
-                    success: function (response) {
-                        // Add the response to the chat history
-                        $('#chatHistory').append('<p><strong>Agent:</strong> ' + response + '</p>');
-                        // Scroll to the bottom of the chat history
-                        $('#chatHistory').scrollTop($('#chatHistory')[0].scrollHeight);
-                    },
-                    error: function (jqXHR, textStatus, errorThrown) {
-                        // Display an error message in the chat history
-                        $('#chatHistory').append('<p><strong>Agent:</strong> Error occurred while processing your request: ' + jqXHR.responseText + '</p>');
-                        // Scroll to the bottom of the chat history
-                        $('#chatHistory').scrollTop($('#chatHistory')[0].scrollHeight);
-                    }
-                });
-            });
-
-            $('#filebtn').click(function () {
-                $('#file').click();
-            });
-
-            $('#file').change(function () {
-                if ($('#file').val()) {
-                    if (validateFileType()) {
-                        $('#fileUploadForm').submit();
-                    } else {
-                        alert('Unsupported file type. Please select one of the supported file types: ' + allowedExtensions.slice(0, -1).join(', ') + ', and ' + allowedExtensions.slice(-1) + '.');
-                        $('#file').val(''); // Clear the file input
-                    }
-                }
-            });
-
-            $('#fileUploadForm').submit(function (e) {
-                e.preventDefault(); // Prevent the default form submission
-
-                // var formData = new FormData(this);
-                var formData = new FormData();
-                var fileInput = document.getElementById('file');
-                var file = fileInput.files[0];
-
-                // Append the file with a specific content type
-                formData.append('file', new Blob([file], { type: 'text/plain' }), file.name);
-
-                $.ajax({
-                    url: '/upload', // Replace with your actual upload endpoint
-                    type: 'POST',
-                    data: formData,
-                    contentType: false,
-                    processData: false,
-                    success: function (response) {
-                        // Handle success response
-                         appendAlert('File uploaded successfully!', 'success');
-                         const fileList = document.getElementById('fileList');
-                         const wrapper = document.createElement('li');
-                         wrapper.innerHTML = '<a class="dropdown-item" href="#">' + file.name + '</a>';
-                         fileList.append(wrapper);
-
-                         $('#file').val(''); // Clear the file input
-                    },
-                    error: function (jqXHR, textStatus, errorThrown) {
-                        // Handle error response
-                        alert('Error occurred while uploading the file: ' + jqXHR.responseText);
-                    }
-                });
-            });
-            const alertPlaceholder = document.getElementById('liveAlertPlaceholder');
-            const appendAlert = (message, type) => {
-              const wrapper = document.createElement('div');
-              wrapper.innerHTML = [
-                `<div class="alert alert-${type} alert-dismissible" role="alert">`,
-                `   <div>${message}</div>`,
-                '   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>',
-                '</div>'
-              ].join('')
-
-              alertPlaceholder.append(wrapper)
-            }
-
-            // Add keypress event listener to chatPrompt input
-            $('#chatPrompt2').keypress(function (e) {
-                if (e.which === 13) { // Enter key pressed
-                    $('#sendPrompt2').click();
-                    return false; // Prevent the default form submission
-                }
-            });
-
-            // Function to validate the file type
-            function validateFileType() {
-                var fileInput = document.getElementById('file');
-                var filePath = fileInput.value;
-                var fileExtension = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
-                return allowedExtensions.includes(fileExtension);
-            }
-
-            // Function to convert Float32Array to PCM16
-    function convertFloat32ToPCM(input) {
-        const output = new DataView(new ArrayBuffer(input.length * 2));
-        for (let i = 0; i < input.length; i++) {
-            const s = Math.max(-1, Math.min(1, input[i]));
-            output.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        }
-        return output;
-    }
-
-    function playAudioQueue() {
-        if (audioQueue.length === 0) {
-            isPlaying = false;
-            return;
-        }
-
-        isPlaying = true;
-        const audioBuffer = audioQueue.shift();
-        const audioSource = audioContext.createBufferSource();
-        audioSource.buffer = audioBuffer;
-        audioSource.connect(audioContext.destination);
-        audioSource.start();
-
-        audioSource.onended = () => {
-            playAudioQueue();
-        };
-    }
-
-    // Audio streaming
-    $('#startAudioStream').click(async function () {
-        const desiredSampleRate = 16000; // Set your desired sample rate here (e.g., 16000 Hz)
-
-        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: desiredSampleRate });
-
-        source = audioContext.createMediaStreamSource(audioStream);
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        var scheme = document.location.protocol === "https:" ? "wss" : "ws";
-        var port = document.location.port ? (":" + document.location.port) : "";
-        const connectionUrl = scheme + "://" + document.location.hostname + port + "/audio";
-        socket = new WebSocket(connectionUrl);
-
-        socket.onopen = () => {
-            console.log('WebSocket connection opened');
-        };
-
-        socket.onclose = () => {
-            console.log('WebSocket connection closed');
-            audioStream.getTracks().forEach(track => track.stop());
-            processor.disconnect();
-            source.disconnect();
-        };
-
-        processor.onaudioprocess = (event) => {
-            if (socket.readyState === WebSocket.OPEN) {
-                const inputData = event.inputBuffer.getChannelData(0);
-                const pcmData = convertFloat32ToPCM(inputData);
-                socket.send(pcmData.buffer);
-            }
-        };
-
-        socket.onmessage = async (event) => {
-           const arrayBuffer = await event.data.arrayBuffer();
-
-           if (arrayBuffer.byteLength === 4) {
-               // check if the 4 bytes in the arrayBuffer are all zero
-                const view = new DataView(arrayBuffer);
-                if (view.getInt32() === 0) {
-                     console.log('Received empty audio buffer');
-                     console.log(arrayBuffer);
-                     audioQueue = [];
-                     return;
-                }
-           }
-           const pcmData = new Int16Array(arrayBuffer);
-           if (pcmData.length === 0) {
-               console.log('Received empty audio buffer');
+        $('#sendPrompt2').click(function () {
+            var prompt = $('#chatPrompt2').val();
+            if (prompt.trim() === '') {
                return;
-           }
-           const float32Data = new Float32Array(pcmData.length);
-
-            for (let i = 0; i < pcmData.length; i++) {
-                float32Data[i] = pcmData[i] / 0x8000; // Convert PCM16 to Float32
             }
-            
-            const receivedSampleRate = 24000;
-            const audioBuffer = audioContext.createBuffer(1, float32Data.length, receivedSampleRate);
-            audioBuffer.copyToChannel(float32Data, 0);
+            // Clear the chat prompt textbox
+            $('#chatPrompt2').val('');
+            // Add the prompt to the chat history
+            $('#chatHistory').append('<p><strong>You:</strong> ' + prompt + '</p>');
+            // Send the prompt to the backend via AJAX
+            $.ajax({
+                url: '/chat',
+                type: 'POST',
+                contentType: 'application/json',
+                data: prompt,
+                success: function (response) {
+                    // Add the response to the chat history
+                    $('#chatHistory').append('<p><strong>Agent:</strong> ' + response + '</p>');
+                    // Scroll to the bottom of the chat history
+                    $('#chatHistory').scrollTop($('#chatHistory')[0].scrollHeight);
+                },
+                error: function (jqXHR, textStatus, errorThrown) {
+                    // Display an error message in the chat history
+                    $('#chatHistory').append('<p><strong>Agent:</strong> Error occurred while processing your request: ' + jqXHR.responseText + '</p>');
+                    // Scroll to the bottom of the chat history
+                    $('#chatHistory').scrollTop($('#chatHistory')[0].scrollHeight);
+                }
+            });
+        });
+  
+        $('#filebtn').click(function () {
+            $('#file').click();
+        });
 
-            audioQueue.push(audioBuffer);
-            if (!isPlaying) {
-                playAudioQueue();
-            }
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-    });
-
-        // Stop audio streaming
-        $('#stopAudioStream').click(function () {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.close();
+        $('#file').change(function () {
+            if ($('#file').val()) {
+                if (validateFileType()) {
+                    $('#fileUploadForm').submit();
+                } else {
+                    alert('Unsupported file type. Please select one of the supported file types: ' + allowedExtensions.slice(0, -1).join(', ') + ', and ' + allowedExtensions.slice(-1) + '.');
+                    $('#file').val(''); // Clear the file input
+                }
             }
         });
+  
+        $('#fileUploadForm').submit(function (e) {
+            e.preventDefault(); // Prevent the default form submission
+
+            // var formData = new FormData(this);
+            var formData = new FormData();
+            var fileInput = document.getElementById('file');
+            var file = fileInput.files[0];
+
+            // Append the file with a specific content type
+            formData.append('file', new Blob([file], { type: 'text/plain' }), file.name);
+
+            $.ajax({
+                url: '/upload', // Replace with your actual upload endpoint
+                type: 'POST',
+                data: formData,
+                contentType: false,
+                processData: false,
+                success: function (response) {
+                    // Handle success response
+                     appendAlert('File uploaded successfully!', 'success');
+                     const fileList = document.getElementById('fileList');
+                     const wrapper = document.createElement('li');
+                     wrapper.innerHTML = '<a class="dropdown-item" href="#">' + file.name + '</a>';
+                     fileList.append(wrapper);
+
+                     $('#file').val(''); // Clear the file input
+                },
+                error: function (jqXHR, textStatus, errorThrown) {
+                    // Handle error response
+                    alert('Error occurred while uploading the file: ' + jqXHR.responseText);
+                }
+            });
+        });
+
+        const alertPlaceholder = document.getElementById('liveAlertPlaceholder');
+        const appendAlert = (message, type) => {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = [
+            `<div class="alert alert-${type} alert-dismissible" role="alert">`,
+            `   <div>${message}</div>`,
+            '   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>',
+            '</div>'
+          ].join('')
+
+          alertPlaceholder.append(wrapper)
+        }
+
+        // Add keypress event listener to chatPrompt input
+        $('#chatPrompt2').keypress(function (e) {
+            if (e.which === 13) { // Enter key pressed
+                $('#sendPrompt2').click();
+                return false; // Prevent the default form submission
+            }
+        });
+
+        // Function to validate the file type
+        function validateFileType() {
+            var fileInput = document.getElementById('file');
+            var filePath = fileInput.value;
+            var fileExtension = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
+            return allowedExtensions.includes(fileExtension);
+        }
+
+        // Function to convert Float32Array to PCM16
+        function convertFloat32ToPCM(input) {
+            const output = new DataView(new ArrayBuffer(input.length * 2));
+            for (let i = 0; i < input.length; i++) {
+                const s = Math.max(-1, Math.min(1, input[i]));
+                output.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return output;
+        }
+  
+        function playAudioQueue() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                return;
+            }
+       
+            isPlaying = true;
+            const audioBuffer = audioQueue.shift();
+            const audioSource = audioContext.createBufferSource();
+            audioSource.buffer = audioBuffer;
+            audioSource.connect(audioContext.destination);
+            audioSource.start();
+       
+            audioSource.onended = () => {
+                playAudioQueue();
+            };
+        }
+           
+        // Audio streaming
+        $('#startAudioStream').click(async function () {
+            const desiredSampleRate = 16000; // Set your desired sample rate here (e.g., 16000 Hz)
+       
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: desiredSampleRate });
+       
+            source = audioContext.createMediaStreamSource(audioStream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+       
+            var scheme = document.location.protocol === "https:" ? "wss" : "ws";
+            var port = document.location.port ? (":" + document.location.port) : "";
+            const connectionUrl = scheme + "://" + document.location.hostname + port + "/audio";
+            socket = new WebSocket(connectionUrl);
+       
+            socket.onopen = () => {
+                console.log('WebSocket connection opened');
+            };
+       
+            socket.onclose = (event) => {
+                console.log('WebSocket connection closed');
+                console.log(`Code: ${event.code}, Reason: ${event.reason}`);
+                audioStream.getTracks().forEach(track => track.stop());
+                processor.disconnect();
+                source.disconnect();
+            };
+       
+            processor.onaudioprocess = (event) => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    const pcmData = convertFloat32ToPCM(inputData);
+                    socket.send(pcmData.buffer);
+                }
+            };
+       
+            socket.onmessage = async (event) => {
+               const arrayBuffer = await event.data.arrayBuffer();
+       
+               if (arrayBuffer.byteLength === 4) {
+                   // check if the 4 bytes in the arrayBuffer are all zero
+                    const view = new DataView(arrayBuffer);
+                    if (view.getInt32() === 0) {
+                         console.log('Received user interruption message. Empty the audio playback queue.');
+                         console.log(arrayBuffer);
+                         audioQueue = [];
+                         return;
+                    }
+               }
+               const pcmData = new Int16Array(arrayBuffer);
+               if (pcmData.length === 0) {
+                   console.log('Received empty audio buffer');
+                   return;
+               }
+               const float32Data = new Float32Array(pcmData.length);
+       
+                for (let i = 0; i < pcmData.length; i++) {
+                    float32Data[i] = pcmData[i] / 0x8000; // Convert PCM16 to Float32
+                }
+                
+                const receivedSampleRate = 24000;
+                const audioBuffer = audioContext.createBuffer(1, float32Data.length, receivedSampleRate);
+                audioBuffer.copyToChannel(float32Data, 0);
+       
+                audioQueue.push(audioBuffer);
+                if (!isPlaying) {
+                    playAudioQueue();
+                }
+            };
+       
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+        });
+  
+        // Stop audio streaming
+        $('#stopAudioStream').click(function () {
+            console.log('stopAudioStream clicked');
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+             }
+             if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+             }
+         });
     });
 </script>

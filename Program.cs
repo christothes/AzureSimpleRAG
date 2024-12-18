@@ -8,6 +8,7 @@ using Azure.AI.OpenAI;
 using Azure.Identity;
 using OpenAI.RealtimeConversation;
 using AzureSimpleRAG;
+using Azure.Core;
 
 CloudMachineInfrastructure infrastrucutre = new();
 infrastrucutre.AddFeature(new OpenAIModelFeature("gpt-4o-realtime-preview", "2024-10-01"));
@@ -33,7 +34,11 @@ app.UseWebSockets();
 EmbeddingsVectorbase _vectorDb = new(client.GetOpenAIEmbeddingsClient());
 List<ChatMessage> _prompt = [];
 
-AzureOpenAIClient aoaiClient = new(new Uri("https://cm0ddf918b146443b.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=cm0ddf918b146443b_chat"), new AzureCliCredential());
+var clientId = Environment.GetEnvironmentVariable("CLOUDMACHINE_MANAGED_IDENTITY_CLIENT_ID");
+TokenCredential cred = clientId == null ? new AzureCliCredential() : new ManagedIdentityCredential(clientId);
+AzureOpenAIClient aoaiClient = new(
+    new Uri("https://cm0ddf918b146443b.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=cm0ddf918b146443b_chat"), 
+    cred);
 RealtimeConversationClient? realtime = aoaiClient.GetRealtimeConversationClient("cm0ddf918b146443b_chat");
 
 // We'll add a simple function tool that enables the model to interpret user input to figure out when it
@@ -147,7 +152,7 @@ async Task Echo(WebSocket webSocket)
             // processing loop.
             _ = Task.Run(async () =>
             {
-                using var stream = await WebSocketAudioStream.StartAsync(webSocket);
+                using var stream = WebSocketAudioStream.Start(webSocket);
                 Console.WriteLine($" >>> Listening to microphone input");
                 Console.WriteLine($" >>> (Just tell the app you're done to finish)");
                 Console.WriteLine();

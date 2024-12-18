@@ -1,4 +1,4 @@
-﻿using System;
+﻿using System.Buffers;
 using System.Net.WebSockets;
 using System.Text;
 
@@ -17,29 +17,35 @@ namespace AzureSimpleRAG
         private int _bufferWritePos = 0;
         WebSocket _webSocket;
         private bool _isRecording = false;
-        //private static string filePath = @"c:\users\chriss\desktop\audio.wav";
-        //private FileStream _fileStream;
+        private string? filePath = null;
+        private FileStream? _fileStream;
 
 
-        private WebSocketAudioStream(WebSocket webSocket)
+        private WebSocketAudioStream(WebSocket webSocket, bool outputWavFile)
         {
             _webSocket = webSocket;
-            //_fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
-            //WriteWavHeader();
+            if (outputWavFile)
+            {
+                // create a value for the file path that is based on the current date and time and is in the user's profile folder. Use the Environment class to get the platform agnostic path to the user's foler
+                filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "websocket-audio", $"audio-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.wav");
+                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                Console.WriteLine($"saving captured audio to wav file: {filePath}");
+                _fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+                WriteWavHeader();
+            }
         }
 
-        private async Task StartRecordingAsync()
+        private void StartRecording()
         {
             _isRecording = true;
 
-#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-            Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
                 bool _isSocketClosed = false;
                 WebSocketReceiveResult? receiveResult = null;
                 while (_isRecording && !_isSocketClosed)
                 {
-                    byte[] _tmpbuffer = new byte[1024 * 16];
+                    byte[] _tmpbuffer = ArrayPool<byte>.Shared.Rent(1024 * 16);
                     receiveResult = await _webSocket.ReceiveAsync(new ArraySegment<byte>(_tmpbuffer), CancellationToken.None);
                     lock (_bufferLock)
                     {
@@ -55,6 +61,7 @@ namespace AzureSimpleRAG
                         _bufferWritePos += bytesToCopy;
                     }
                     _isSocketClosed = receiveResult.CloseStatus.HasValue;
+                    ArrayPool<byte>.Shared.Return(_tmpbuffer);
                 }
                 Console.WriteLine("WebSocketAudioStream detected Closed socket");
                 _isRecording = false;
@@ -66,70 +73,18 @@ namespace AzureSimpleRAG
             });
         }
 
-        public static async Task<WebSocketAudioStream> StartAsync(WebSocket webSocket)
+        public static WebSocketAudioStream Start(WebSocket webSocket, bool outputWavFile = false)
         {
-            var stream = new WebSocketAudioStream(webSocket);
-            await stream.StartRecordingAsync();
+            var stream = new WebSocketAudioStream(webSocket, outputWavFile);
+            stream.StartRecording();
             return stream;
-
         }
 
-        public override bool CanRead => true;
-
-        public override bool CanSeek => false;
-
-        public override bool CanWrite => false;
-
-        public override long Length => throw new NotImplementedException();
-
-        public override long Position { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-        public override void Flush()
-        {
-            throw new NotImplementedException();
-        }
-
-        //private void WriteWavHeader()
-        //{
-        //    // WAV file header format
-        //    int sampleRate = SAMPLES_PER_SECOND;
-        //    short bitsPerSample = 16;
-        //    short channels = CHANNELS;
-        //    int byteRate = sampleRate * channels * bitsPerSample / 8;
-        //    short blockAlign = (short)(channels * bitsPerSample / 8);
-
-        //    // RIFF header
-        //    _fileStream.Write(Encoding.ASCII.GetBytes("RIFF"), 0, 4);
-        //    _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for file size
-        //    _fileStream.Write(Encoding.ASCII.GetBytes("WAVE"), 0, 4);
-
-        //    // fmt subchunk
-        //    _fileStream.Write(Encoding.ASCII.GetBytes("fmt "), 0, 4);
-        //    _fileStream.Write(BitConverter.GetBytes(16), 0, 4); // Subchunk1Size (16 for PCM)
-        //    _fileStream.Write(BitConverter.GetBytes((short)1), 0, 2); // AudioFormat (1 for PCM)
-        //    _fileStream.Write(BitConverter.GetBytes(channels), 0, 2);
-        //    _fileStream.Write(BitConverter.GetBytes(sampleRate), 0, 4);
-        //    _fileStream.Write(BitConverter.GetBytes(byteRate), 0, 4);
-        //    _fileStream.Write(BitConverter.GetBytes(blockAlign), 0, 2);
-        //    _fileStream.Write(BitConverter.GetBytes(bitsPerSample), 0, 2);
-
-        //    // data subchunk
-        //    _fileStream.Write(Encoding.ASCII.GetBytes("data"), 0, 4);
-        //    _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for data chunk size
-        //}
-
-        //private void UpdateWavHeader()
-        //{
-        //    _fileStream.Seek(4, SeekOrigin.Begin);
-        //    _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 8)), 0, 4); // File size - 8 bytes
-
-        //    _fileStream.Seek(40, SeekOrigin.Begin);
-        //    _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 44)), 0, 4); // Data chunk size
-        //}
+       
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            if (_webSocket.State == WebSocketState.Closed)
+            if (!_isRecording)
             {
                 return 0;
             }
@@ -143,7 +98,7 @@ namespace AzureSimpleRAG
             while (GetBytesAvailable() < count)
             {
                 Thread.Sleep(100);
-                if (_webSocket.State == WebSocketState.Closed)
+                if (!_isRecording)
                 {
                     return 0;
                 }
@@ -170,40 +125,87 @@ namespace AzureSimpleRAG
             }
 
             // Write the read bytes to the file
-            //_fileStream.Write(buffer, 0, totalCount);
-            //_fileStream.Flush();
-
-
-
-            Console.Write($".");
+            if (_fileStream != null)
+            {
+                _fileStream.Write(buffer, 0, totalCount);
+                _fileStream.Flush();
+            }
             return totalCount;
         }
 
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            throw new NotImplementedException();
-        }
+        public override bool CanRead => true;
 
-        public override void SetLength(long value)
-        {
-            throw new NotImplementedException();
-        }
+        public override bool CanSeek => false;
 
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            throw new NotImplementedException();
-        }
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotImplementedException();
+
+        public override long Position { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        public override void Flush() => throw new NotImplementedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotImplementedException();
+
+        public override void SetLength(long value) => throw new NotImplementedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotImplementedException();
 
         protected override void Dispose(bool disposing)
         {
             Console.WriteLine("Disposing WebSocketAudioStream");
-            //if (disposing)
-            //{
-            //    Console.WriteLine("DIsposing Filestream");
-            //    UpdateWavHeader();
-            //    _fileStream?.Dispose();
-            //}
+            if (disposing && _fileStream != null)
+            {
+                Console.WriteLine("DIsposing Filestream");
+                UpdateWavHeader();
+                _fileStream?.Dispose();
+            }
             base.Dispose(disposing);
+        }
+        private void WriteWavHeader()
+        {
+            if (_fileStream == null)
+            {
+                return;
+            }
+            // WAV file header format
+            int sampleRate = SAMPLES_PER_SECOND;
+            short bitsPerSample = 16;
+            short channels = CHANNELS;
+            int byteRate = sampleRate * channels * bitsPerSample / 8;
+            short blockAlign = (short)(channels * bitsPerSample / 8);
+
+            // RIFF header
+            _fileStream.Write(Encoding.ASCII.GetBytes("RIFF"), 0, 4);
+            _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for file size
+            _fileStream.Write(Encoding.ASCII.GetBytes("WAVE"), 0, 4);
+
+            // fmt subchunk
+            _fileStream.Write(Encoding.ASCII.GetBytes("fmt "), 0, 4);
+            _fileStream.Write(BitConverter.GetBytes(16), 0, 4); // Subchunk1Size (16 for PCM)
+            _fileStream.Write(BitConverter.GetBytes((short)1), 0, 2); // AudioFormat (1 for PCM)
+            _fileStream.Write(BitConverter.GetBytes(channels), 0, 2);
+            _fileStream.Write(BitConverter.GetBytes(sampleRate), 0, 4);
+            _fileStream.Write(BitConverter.GetBytes(byteRate), 0, 4);
+            _fileStream.Write(BitConverter.GetBytes(blockAlign), 0, 2);
+            _fileStream.Write(BitConverter.GetBytes(bitsPerSample), 0, 2);
+
+            // data subchunk
+            _fileStream.Write(Encoding.ASCII.GetBytes("data"), 0, 4);
+            _fileStream.Write(BitConverter.GetBytes(0), 0, 4); // Placeholder for data chunk size
+        }
+
+        private void UpdateWavHeader()
+        {
+            if(_fileStream == null)
+            {
+                return;
+            }
+            _fileStream.Seek(4, SeekOrigin.Begin);
+            _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 8)), 0, 4); // File size - 8 bytes
+
+            _fileStream.Seek(40, SeekOrigin.Begin);
+            _fileStream.Write(BitConverter.GetBytes((int)(_fileStream.Length - 44)), 0, 4); // Data chunk size
         }
     }
 }
